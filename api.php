@@ -35,23 +35,12 @@ try {
         throw new Exception('Missing required parameter: account_number');
     }
     
+
+
     // Process the data
     $result = processZenginData($bank_code, $branch_code, $account_type, $account_number, $account_holder_kana, $amount);
-    
-    // Return success response with all received parameters
-    $response = [
-        'success' => true,
-        'received_parameters' => [
-            'bank_code' => $bank_code,
-            'branch_code' => $branch_code,
-            'account_type' => $account_type,
-            'account_number' => $account_number,
-            'account_holder_kana' => $account_holder_kana,
-            'amount' => $amount
-        ],
-        'processed_data' => $result,
-        'timestamp' => date('Y-m-d H:i:s')
-    ];
+
+    $response = $result;
     
     http_response_code(200);
     echo json_encode($response, JSON_PRETTY_PRINT);
@@ -76,9 +65,64 @@ try {
     echo json_encode($response, JSON_PRETTY_PRINT);
 }
 
+/**
+ * Validate and get bank information
+ * @param string $bank_code
+ * @return array|null
+ */
+function validateBankCode($bank_code) {
+    $formatted_bank_code = str_pad($bank_code, 4, '0', STR_PAD_LEFT);
+    
+    // Load banks.json file
+    $banks_file = __DIR__ . '/banks.json';
+    if (!file_exists($banks_file)) {
+        throw new Exception('Banks data file not found: banks.json');
+    }
+    
+    $banks_data = json_decode(file_get_contents($banks_file), true);
+    if ($banks_data === null) {
+        throw new Exception('Invalid banks.json file format');
+    }
+    
+    if (!isset($banks_data[$formatted_bank_code])) {
+        throw new Exception("Invalid bank code: {$bank_code} (formatted: {$formatted_bank_code})");
+    }
+    
+    return $banks_data[$formatted_bank_code];
+}
+
 
 /**
- * Process zengin (Japanese banking) data
+ * Validate and get branch information
+ * @param string $bank_code
+ * @param string $branch_code
+ * @return array|null
+ */
+function validateBranchCode($bank_code, $branch_code) {
+    $formatted_bank_code = str_pad($bank_code, 4, '0', STR_PAD_LEFT);
+    $formatted_branch_code = str_pad($branch_code, 3, '0', STR_PAD_LEFT);
+    
+    // Load specific bank's branch file
+    $branch_file = __DIR__ . "/branches/{$formatted_bank_code}.json";
+    if (!file_exists($branch_file)) {
+        throw new Exception("Branch data file not found for bank code: {$bank_code} (file: branches/{$formatted_bank_code}.json)");
+    }
+    
+    $branch_data = json_decode(file_get_contents($branch_file), true);
+    if ($branch_data === null) {
+        throw new Exception("Invalid branch file format for bank code: {$bank_code}");
+    }
+    
+    if (!isset($branch_data[$formatted_branch_code])) {
+        throw new Exception("Invalid branch code: {$branch_code} (formatted: {$formatted_branch_code}) for bank code: {$bank_code}");
+    }
+    
+    return $branch_data[$formatted_branch_code];
+}
+
+
+/**
+ * Process zengin data
  * @param string $bank_code
  * @param string $branch_code
  * @param string $account_type
@@ -88,6 +132,11 @@ try {
  * @return array
  */
 function processZenginData($bank_code, $branch_code, $account_type, $account_number, $account_holder_kana, $amount) {
+    // Validate bank code and get bank information
+    $bank_info = validateBankCode($bank_code);
+    // Validate branch code and get branch information
+    $branch_info = validateBranchCode($bank_code, $branch_code);
+
     // Example processing for Japanese banking data
     $processed_data = [
         'formatted_bank_code' => str_pad($bank_code, 4, '0', STR_PAD_LEFT),
@@ -95,7 +144,9 @@ function processZenginData($bank_code, $branch_code, $account_type, $account_num
         'formatted_account_number' => $account_number,
         'account_type_description' => getAccountTypeDescription($account_type),
         'formatted_amount' => str_pad($amount, 10, '0', STR_PAD_LEFT),
-        'account_holder_kana_upper' => mb_convert_kana($account_holder_kana, "kas"),
+        'account_holder_kana_hankaku' => mb_convert_kana($account_holder_kana, "kas"),
+        'valdiate_bank_name' => $bank_info['name'],
+        'valdiate_branch_name' => $branch_info['name'],
     ];
     
     return $processed_data;
@@ -108,9 +159,9 @@ function processZenginData($bank_code, $branch_code, $account_type, $account_num
  */
 function getAccountTypeDescription($account_type) {
     $types = [
-        '1' => '普通',
-        '2' => '当座',
-        '3' => '貯蓄',
+        '普通' => '1',
+        '当座' => '2',
+        '貯蓄' => '4',
     ];
     
     return isset($types[$account_type]) ? $types[$account_type] : 'Unknown';
